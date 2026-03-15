@@ -22,13 +22,13 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # Allow CORS for testing
-   # app.add_middleware(
-    #    CORSMiddleware,
-     #    allow_origins=["*"],
-      #  allow_credentials=True,
-       # allow_methods=["*"],
-        #allow_headers=["*"],
-    #)
+app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 app.include_router(
     fastapi_users.get_auth_router(auth_backend),
@@ -60,11 +60,11 @@ app.include_router(
     tags=["users"],
 )
 
-# app.include_router(
-#     fastapi_users.get_auth_router(refresh_auth_backend),
-#     prefix="/auth/jwt",
-#     tags=["auth"]
-# )
+app.include_router(
+     fastapi_users.get_auth_router(refresh_auth_backend),
+     prefix="/auth/jwt",
+     tags=["auth"]
+ )
 
 @app.post("/upload")
 async def upload_file(
