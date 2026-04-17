@@ -54,7 +54,7 @@ auth_backend = AuthenticationBackend(
 refresh_bearer_transport = BearerTransport(tokenUrl="auth/jwt/refresh")
 
 def get_refresh_jwt_strategy() -> JWTStrategy:
-    return JWTStrategy(secret=SECRET, lifetime_seconds=7200) 
+    return JWTStrategy(secret=SECRET, lifetime_seconds=100) 
 
 refresh_auth_backend = AuthenticationBackend(
     name="jwt_refresh",

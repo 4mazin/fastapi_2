@@ -13,6 +13,17 @@ import os
 import uuid
 import tempfile
 from app.users import UserManager, fastapi_users, current_active_user, auth_backend, refresh_auth_backend
+from fastapi.security import OAuth2PasswordRequestForm
+from app.users import (
+    UserManager,
+    fastapi_users,
+    current_active_user,
+    auth_backend,
+    get_user_manager,
+    get_jwt_strategy,
+    get_refresh_jwt_strategy
+)
+from fastapi_users import exceptions
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -33,6 +44,12 @@ app.add_middleware(
 app.include_router(
     fastapi_users.get_auth_router(auth_backend),
     prefix="/auth/jwt",
+    tags=["auth"],
+)
+
+app.include_router(
+    fastapi_users.get_auth_router(refresh_auth_backend),
+    prefix="/auth/jwt/refresh",
     tags=["auth"],
 )
 
@@ -60,11 +77,27 @@ app.include_router(
     tags=["users"],
 )
 
-app.include_router(
-     fastapi_users.get_auth_router(refresh_auth_backend),
-     prefix="/auth/jwt",
-     tags=["auth"]
- )
+@app.post("/auth/login")
+async def login(
+    credentials: OAuth2PasswordRequestForm = Depends(),
+    user_manager=Depends(get_user_manager),
+):
+    user = await user_manager.authenticate(credentials)
+
+    if user is None:
+        raise exceptions.InvalidCredentialsException()
+
+    access_token = await get_jwt_strategy().write_token(user)
+    refresh_token = await get_refresh_jwt_strategy().write_token(user)
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer"
+    }
+
+
+
 
 @app.post("/upload")
 async def upload_file(
