@@ -15,3 +15,6 @@ class UserCreate(schemas.BaseUserCreate):
 
 class UserUpdate(schemas.BaseUserUpdate):
     pass
+
+class RefreshRequest(BaseModel):
+    refresh_token: str

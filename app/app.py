@@ -1,7 +1,8 @@
 from logging import exception
+from datetime import timedelta
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Depends
-from app.schemas import PostCreate, UserRead, UserCreate, UserUpdate
+from app.schemas import PostCreate, UserRead, UserCreate, UserUpdate, RefreshRequest
 from app.db import Post, create_db_and_tables, get_async_session, User
 from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
@@ -12,7 +13,7 @@ import shutil
 import os
 import uuid
 import tempfile
-from app.users import UserManager, fastapi_users, current_active_user, auth_backend, refresh_auth_backend
+from app.users import UserManager, fastapi_users, current_active_user, auth_backend, refresh_auth_backend, create_access_token,decode_token, get_current_user
 from fastapi.security import OAuth2PasswordRequestForm
 from app.users import (
     UserManager,
@@ -21,7 +22,8 @@ from app.users import (
     auth_backend,
     get_user_manager,
     get_jwt_strategy,
-    get_refresh_jwt_strategy
+    get_refresh_jwt_strategy,
+    get_current_user
 )
 from fastapi_users import exceptions
 
@@ -42,18 +44,6 @@ app.add_middleware(
     )
 
 app.include_router(
-    fastapi_users.get_auth_router(auth_backend),
-    prefix="/auth/jwt",
-    tags=["auth"],
-)
-
-app.include_router(
-    fastapi_users.get_auth_router(refresh_auth_backend),
-    prefix="/auth/jwt/refresh",
-    tags=["auth"],
-)
-
-app.include_router(
     fastapi_users.get_register_router(UserRead, UserCreate),
     prefix="/auth",
     tags=["auth"],
@@ -71,11 +61,13 @@ app.include_router(
     tags=["auth"],
 )
 
-app.include_router(
-    fastapi_users.get_users_router(UserRead, UserUpdate),
-    prefix="/users",
-    tags=["users"],
-)
+@app.get("/users/me")
+async def get_me(user: User = Depends(get_current_user)):
+    return {
+        "id": str(user.id),
+        "email": user.email
+    }
+
 
 @app.post("/auth/login")
 async def login(
@@ -84,26 +76,47 @@ async def login(
 ):
     user = await user_manager.authenticate(credentials)
 
-    if user is None:
-        raise exceptions.InvalidCredentialsException()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid credentials")
 
-    access_token = await get_jwt_strategy().write_token(user)
-    refresh_token = await get_refresh_jwt_strategy().write_token(user)
+    access_token = create_access_token(
+        {"id": str(user.id), "email": user.email}
+    )
+
+    refresh_token = create_access_token(
+        {"id": str(user.id), "email": user.email},
+        expires_delta=timedelta(days=7),
+        refresh=True
+    )
 
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
-        "token_type": "bearer"
+        "user": {"id": str(user.id), "email": user.email}
     }
 
+@app.post("/auth/refresh")
+async def refresh_token(data: RefreshRequest):
+    payload = decode_token(data.refresh_token)
 
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
+    if not payload.get("refresh"):
+        raise HTTPException(status_code=401, detail="Not refresh token")
+
+    new_access_token = create_access_token(
+        user_data=payload["user"],
+        refresh=False
+    )
+
+    return {"access_token": new_access_token}
 
 @app.post("/upload")
 async def upload_file(
     file: UploadFile = File(...),
     caption: str = Form(""),
-    user: User = Depends(current_active_user),
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     try:
@@ -138,7 +151,7 @@ async def upload_file(
 
 @app.get("/feed")
 async def get_feed(
-    user: User = Depends(current_active_user),
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     # Get all posts ordered by newest first
@@ -173,7 +186,7 @@ async def get_feed(
 @app.delete("/posts/{post_id}")
 async def delete_post(
     post_id: str,
-    user: User = Depends(current_active_user),
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     try:

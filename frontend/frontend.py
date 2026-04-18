@@ -8,41 +8,39 @@ st.set_page_config(page_title="Simple Social", layout="wide")
 # -----------------------
 # Session state
 # -----------------------
-if 'token' not in st.session_state:
-    st.session_state.token = None
+if 'access_token' not in st.session_state:
+    st.session_state.access_token = None
+
+if 'refresh_token' not in st.session_state:
+    st.session_state.refresh_token = None
+
 if 'user' not in st.session_state:
     st.session_state.user = None
-if 'password' not in st.session_state:
-    st.session_state.password = None
 
 
 # -----------------------
 # Helpers
 # -----------------------
 def get_headers():
-    if st.session_state.token:
-        return {"Authorization": f"Bearer {st.session_state.token}"}
+    if st.session_state.access_token:
+        return {"Authorization": f"Bearer {st.session_state.access_token}"}
     return {}
 
 
-def re_login():
-    """
-    OPTION A: re-authenticate using email + password
-    """
-    if not st.session_state.user or not st.session_state.password:
+def refresh_access_token():
+    if not st.session_state.refresh_token:
         return False
 
     response = requests.post(
-        "http://localhost:8000/auth/login",
-        data={
-            "username": st.session_state.user["email"],
-            "password": st.session_state.password
+        "http://localhost:8000/auth/refresh",
+        json={
+            "refresh_token": st.session_state.refresh_token
         }
     )
 
     if response.status_code == 200:
-        token_data = response.json()
-        st.session_state.token = token_data["access_token"]
+        new_token = response.json()["access_token"]
+        st.session_state.access_token = new_token
         return True
 
     return False
@@ -53,19 +51,20 @@ def authorized_request(method, url, **kwargs):
     response = requests.request(method, url, headers=headers, **kwargs)
 
     if response.status_code == 401:
-        # 🔁 OPTION A: re-login
-        success = re_login()
+        # 🔁 TRY REFRESH TOKEN
+        success = refresh_access_token()
 
         if success:
             headers = get_headers()
             return requests.request(method, url, headers=headers, **kwargs)
 
-        else:
-            st.session_state.user = None
-            st.session_state.token = None
-            st.session_state.password = None
-            st.warning("Session expired. Please login again.")
-            st.rerun()
+        # ❌ refresh failed → logout
+        st.session_state.user = None
+        st.session_state.access_token = None
+        st.session_state.refresh_token = None
+
+        st.warning("Session expired. Please login again.")
+        st.rerun()
 
     return response
 
@@ -96,8 +95,8 @@ def login_page():
                 if response.status_code == 200:
                     token_data = response.json()
 
-                    st.session_state.token = token_data["access_token"]
-                    st.session_state.password = password  # 🔥 REQUIRED FOR OPTION A
+                    st.session_state.access_token = token_data["access_token"]
+                    st.session_state.refresh_token = token_data["refresh_token"]
 
                     # get user
                     user_response = authorized_request(
