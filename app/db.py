@@ -1,4 +1,5 @@
 from collections.abc import AsyncGenerator
+import enum
 import uuid
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
@@ -14,13 +15,17 @@ DATABASE_URL = "sqlite+aiosqlite:///./test.db"
 class Base(DeclarativeBase):
     pass
 
+class UserRole(str, enum.Enum):
+    USER = "user"
+    ADMIN = "admin"
+    MODERATOR = "moderator"
+
+
 class User(Base, SQLAlchemyBaseUserTableUUID):
     __tablename__ = "user"
     posts = relationship("Post", back_populates="user")
-
-
-
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    role = Column(String, default=UserRole.USER.value, nullable=False)
     
 
 class Post(Base):

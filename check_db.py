@@ -3,7 +3,7 @@ import sqlite3
 conn = sqlite3.connect("test.db")
 cursor = conn.cursor()
 
-cursor.execute("SELECT id, email, hashed_password FROM user")
+cursor.execute("SELECT * FROM user")
 
 rows = cursor.fetchall()
 

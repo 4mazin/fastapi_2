@@ -195,6 +195,9 @@ def create_transformed_url(original_url, transformation_params, caption=None):
 def feed_page():
     st.title("🏠 Feed")
 
+    current_user_id = st.session_state.user.get("id")
+    current_user_role = st.session_state.user.get("role", "user")
+
     response = authorized_request("GET", "http://localhost:8000/feed")
 
     if response.status_code == 200:
@@ -213,7 +216,10 @@ def feed_page():
                 st.markdown(f"**{post['email']}** • {post['created_at'][:10]}")
 
             with col2:
-                if post.get('Is Owner', False):
+                is_owner = post.get("user_id") == current_user_id
+                is_admin = current_user_role.lower() == "admin"
+
+                if is_admin or is_owner:
                     if st.button("🗑️", key=f"delete_{post['id']}"):
                         response = authorized_request(
                             "DELETE",
@@ -223,6 +229,12 @@ def feed_page():
                         if response.status_code == 200:
                             st.success("Post deleted!")
                             st.rerun()
+                        elif response.status_code == 403:
+                            st.error("You are not allowed to delete this post")
+                        elif response.status_code == 404:
+                            st.error("Post not found")
+                        else:
+                            st.error("Something went wrong")
 
             caption = post.get('caption', '')
 

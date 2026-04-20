@@ -3,7 +3,7 @@ from datetime import timedelta
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Depends
 from app.schemas import PostCreate, UserRead, UserCreate, UserUpdate, RefreshRequest
-from app.db import Post, create_db_and_tables, get_async_session, User
+from app.db import Post, UserRole, create_db_and_tables, get_async_session, User
 from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
 from sqlalchemy import select
@@ -65,7 +65,8 @@ app.include_router(
 async def get_me(user: User = Depends(get_current_user)):
     return {
         "id": str(user.id),
-        "email": user.email
+        "email": user.email,
+        "role": user.role
     }
 
 
@@ -196,7 +197,10 @@ async def delete_post(
         if not post:
             raise HTTPException(status_code=404, detail="Post not found")
         
-        if post.user_id != user.id:
+        if not (
+            user.role == UserRole.ADMIN.value or
+            post.user_id == user.id
+        ):
             raise HTTPException(status_code=403, detail="Not authorized to delete this post")
         
         await session.delete(post)
