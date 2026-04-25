@@ -13,7 +13,7 @@ import shutil
 import os
 import uuid
 import tempfile
-from app.users import UserManager, fastapi_users, current_active_user, auth_backend, refresh_auth_backend, create_access_token,decode_token, get_current_user
+from app.users import UserManager, fastapi_users, current_active_user, auth_backend, refresh_auth_backend, create_access_token,decode_token, get_current_user, get_current_admin
 from fastapi.security import OAuth2PasswordRequestForm
 from app.users import (
     UserManager,
@@ -26,6 +26,8 @@ from app.users import (
     get_current_user
 )
 from fastapi_users import exceptions
+from sqlalchemy import func
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -208,3 +210,18 @@ async def delete_post(
         return {"detail": "Post deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Deletion failed: {str(e)}")
+
+
+@app.get("/admin/dashboard")
+async def admin_dashboard(
+    admin: User = Depends(get_current_admin),
+    session: AsyncSession = Depends(get_async_session)
+):
+    from sqlalchemy import func
+
+    result = await session.execute(select(func.count()).select_from(User))
+    total_users = result.scalar()
+
+    return {
+        "total_users": total_users
+    }

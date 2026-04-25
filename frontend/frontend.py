@@ -2,19 +2,33 @@ import streamlit as st
 import requests
 import base64
 import urllib.parse
+from streamlit_cookies_manager import EncryptedCookieManager
 
 st.set_page_config(page_title="Simple Social", layout="wide")
+
+BASE_URL = "http://localhost:8000"
+
+# -----------------------
+# 🍪 Cookie Manager
+# -----------------------
+cookies = EncryptedCookieManager(
+    prefix="myapp/",
+    password="SUPER_SECRET_KEY"
+)
+
+if not cookies.ready():
+    st.stop()
 
 # -----------------------
 # Session state
 # -----------------------
-if 'access_token' not in st.session_state:
-    st.session_state.access_token = None
+if "access_token" not in st.session_state:
+    st.session_state.access_token = cookies.get("access_token")
 
-if 'refresh_token' not in st.session_state:
-    st.session_state.refresh_token = None
+if "refresh_token" not in st.session_state:
+    st.session_state.refresh_token = cookies.get("refresh_token")
 
-if 'user' not in st.session_state:
+if "user" not in st.session_state:
     st.session_state.user = None
 
 
@@ -27,20 +41,39 @@ def get_headers():
     return {}
 
 
+def save_tokens(access, refresh):
+    st.session_state.access_token = access
+    st.session_state.refresh_token = refresh
+
+    cookies["access_token"] = access
+    cookies["refresh_token"] = refresh
+    cookies.save()
+
+
+def clear_tokens():
+    st.session_state.access_token = None
+    st.session_state.refresh_token = None
+    st.session_state.user = None
+
+    cookies["access_token"] = ""
+    cookies["refresh_token"] = ""
+    cookies.save()
+
+
 def refresh_access_token():
     if not st.session_state.refresh_token:
         return False
 
     response = requests.post(
-        "http://localhost:8000/auth/refresh",
-        json={
-            "refresh_token": st.session_state.refresh_token
-        }
+        f"{BASE_URL}/auth/refresh",
+        json={"refresh_token": st.session_state.refresh_token}
     )
 
     if response.status_code == 200:
         new_token = response.json()["access_token"]
         st.session_state.access_token = new_token
+        cookies["access_token"] = new_token
+        cookies.save()
         return True
 
     return False
@@ -51,22 +84,27 @@ def authorized_request(method, url, **kwargs):
     response = requests.request(method, url, headers=headers, **kwargs)
 
     if response.status_code == 401:
-        # 🔁 TRY REFRESH TOKEN
         success = refresh_access_token()
 
         if success:
             headers = get_headers()
             return requests.request(method, url, headers=headers, **kwargs)
 
-        # ❌ refresh failed → logout
-        st.session_state.user = None
-        st.session_state.access_token = None
-        st.session_state.refresh_token = None
-
+        clear_tokens()
         st.warning("Session expired. Please login again.")
         st.rerun()
 
     return response
+
+
+# -----------------------
+# Restore session after refresh
+# -----------------------
+if st.session_state.access_token and st.session_state.user is None:
+    user_response = authorized_request("GET", f"{BASE_URL}/users/me")
+
+    if user_response.status_code == 200:
+        st.session_state.user = user_response.json()
 
 
 # -----------------------
@@ -83,25 +121,23 @@ def login_page():
 
         # LOGIN
         with col1:
-            if st.button("Login", type="primary", use_container_width=True):
+            if st.button("Login", use_container_width=True):
                 response = requests.post(
-                    "http://localhost:8000/auth/login",
-                    data={
-                        "username": email,
-                        "password": password
-                    }
+                    f"{BASE_URL}/auth/login",
+                    data={"username": email, "password": password}
                 )
 
                 if response.status_code == 200:
-                    token_data = response.json()
+                    data = response.json()
 
-                    st.session_state.access_token = token_data["access_token"]
-                    st.session_state.refresh_token = token_data["refresh_token"]
+                    save_tokens(
+                        data["access_token"],
+                        data["refresh_token"]
+                    )
 
-                    # get user
                     user_response = authorized_request(
                         "GET",
-                        "http://localhost:8000/users/me"
+                        f"{BASE_URL}/users/me"
                     )
 
                     if user_response.status_code == 200:
@@ -115,19 +151,16 @@ def login_page():
 
         # SIGNUP
         with col2:
-            if st.button("Sign Up", type="secondary", use_container_width=True):
+            if st.button("Sign Up", use_container_width=True):
                 response = requests.post(
-                    "http://localhost:8000/auth/register",
+                    f"{BASE_URL}/auth/register",
                     json={"email": email, "password": password}
                 )
 
                 if response.status_code == 201:
-                    st.success("Account created! Click Login now.")
+                    st.success("Account created! Login now.")
                 else:
-                    error_detail = response.json().get("detail", "Registration failed")
-                    st.error(f"Registration failed: {error_detail}")
-    else:
-        st.info("Enter your email and password above")
+                    st.error("Registration failed")
 
 
 # -----------------------
@@ -138,35 +171,30 @@ def upload_page():
 
     uploaded_file = st.file_uploader(
         "Choose media",
-        type=['png', 'jpg', 'jpeg', 'mp4', 'avi', 'mov', 'mkv', 'webm']
+        type=['png', 'jpg', 'jpeg', 'mp4']
     )
 
-    caption = st.text_area("Caption:", placeholder="What's on your mind?")
+    caption = st.text_area("Caption")
 
-    if uploaded_file and st.button("Share", type="primary"):
-        with st.spinner("Uploading..."):
-            files = {
-                "file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)
-            }
-            data = {"caption": caption}
+    if uploaded_file and st.button("Share"):
+        files = {
+            "file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)
+        }
 
-            response = authorized_request(
-                "POST",
-                "http://localhost:8000/upload",
-                files=files,
-                data=data
-            )
+        response = authorized_request(
+            "POST",
+            f"{BASE_URL}/upload",
+            files=files,
+            data={"caption": caption}
+        )
 
-            if response.status_code == 200:
-                st.success("Posted!")
-                st.rerun()
-            else:
-                st.error("Upload failed!")
+        if response.status_code == 200:
+            st.success("Posted!")
+            st.rerun()
+        else:
+            st.error("Upload failed")
 
 
-# -----------------------
-# ImageKit helpers
-# -----------------------
 def encode_text_for_overlay(text):
     if not text:
         return ""
@@ -188,24 +216,20 @@ def create_transformed_url(original_url, transformation_params, caption=None):
 
     return f"{base_url}/tr:{transformation_params}/{file_path}"
 
-
 # -----------------------
 # Feed
 # -----------------------
 def feed_page():
     st.title("🏠 Feed")
 
-    current_user_id = st.session_state.user.get("id")
-    current_user_role = st.session_state.user.get("role", "user")
+    user = st.session_state.user
+    current_user_id = user["id"]
+    current_user_role = user.get("role", "user")
 
-    response = authorized_request("GET", "http://localhost:8000/feed")
+    response = authorized_request("GET", f"{BASE_URL}/feed")
 
     if response.status_code == 200:
         posts = response.json()["posts"]
-
-        if not posts:
-            st.info("No posts yet!")
-            return
 
         for post in posts:
             st.markdown("---")
@@ -216,39 +240,45 @@ def feed_page():
                 st.markdown(f"**{post['email']}** • {post['created_at'][:10]}")
 
             with col2:
-                is_owner = post.get("user_id") == current_user_id
+                is_owner = post["user_id"] == current_user_id
                 is_admin = current_user_role.lower() == "admin"
 
-                if is_admin or is_owner:
-                    if st.button("🗑️", key=f"delete_{post['id']}"):
-                        response = authorized_request(
+                if is_owner or is_admin:
+                    if st.button("🗑️", key=f"del_{post['id']}"):
+                        res = authorized_request(
                             "DELETE",
-                            f"http://localhost:8000/posts/{post['id']}"
+                            f"{BASE_URL}/posts/{post['id']}"
                         )
 
-                        if response.status_code == 200:
-                            st.success("Post deleted!")
+                        if res.status_code == 200:
+                            st.success("Deleted")
                             st.rerun()
-                        elif response.status_code == 403:
-                            st.error("You are not allowed to delete this post")
-                        elif response.status_code == 404:
-                            st.error("Post not found")
-                        else:
-                            st.error("Something went wrong")
 
-            caption = post.get('caption', '')
+            caption = post.get("caption", "")
 
-            if post['file_type'] == 'image':
-                st.image(create_transformed_url(post['url'], "", caption), width=300)
+            if post["file_type"] == "image":
+                st.image(create_transformed_url(post["url"], "", caption), width=300)
             else:
-                st.video(create_transformed_url(
-                    post['url'],
-                    "w-400,h-200,cm-pad_resize,bg-blurred"
-                ), width=300)
+                st.video(post["url"], width=300)
                 st.caption(caption)
 
+
+# -----------------------
+# Admin Dashboard
+# -----------------------
+def admin_dashboard_page():
+    st.title("📊 Admin Dashboard")
+
+    response = authorized_request(
+        "GET",
+        f"{BASE_URL}/admin/dashboard"
+    )
+
+    if response.status_code == 200:
+        data = response.json()
+        st.metric("👥 Total Users", data["total_users"])
     else:
-        st.error("Failed to load feed")
+        st.error("Access denied")
 
 
 # -----------------------
@@ -257,18 +287,22 @@ def feed_page():
 if st.session_state.user is None:
     login_page()
 else:
-    st.sidebar.title(f"👋 Hi {st.session_state.user['email']}!")
+    st.sidebar.title(f"👋 {st.session_state.user['email']}")
 
     if st.sidebar.button("Logout"):
-        st.session_state.user = None
-        st.session_state.token = None
-        st.session_state.password = None
+        clear_tokens()
         st.rerun()
 
-    st.sidebar.markdown("---")
-    page = st.sidebar.radio("Navigate:", ["🏠 Feed", "📸 Upload"])
+    pages = ["🏠 Feed", "📸 Upload"]
+
+    if st.session_state.user.get("role") == "admin":
+        pages.append("📊 Dashboard")
+
+    page = st.sidebar.radio("Navigate", pages)
 
     if page == "🏠 Feed":
         feed_page()
-    else:
+    elif page == "📸 Upload":
         upload_page()
+    else:
+        admin_dashboard_page()

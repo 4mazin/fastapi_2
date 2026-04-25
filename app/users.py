@@ -9,7 +9,7 @@ from fastapi_users.authentication import (
 )
 
 from fastapi_users_db_sqlalchemy import SQLAlchemyUserDatabase
-from app.db import User, get_user_db
+from app.db import User, UserRole, get_user_db
 
 
 SECRET = os.getenv("JWT_SECRET_KEY")
@@ -162,4 +162,11 @@ async def get_current_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    return user
+
+# GET CURRENT USER ADMIN
+
+async def get_current_admin(user: User = Depends(get_current_user)):
+    if user.role != UserRole.ADMIN.value:
+        raise HTTPException(status_code=403, detail="Admins only")
     return user
